@@ -1,0 +1,848 @@
+---
+title: "Product Recommender for an Online Retailer"
+subtitle: "A Simple, Item-Based Collaborative Filtering Recommender Applicaiton in R and R Shiny"
+author: "Amitabh Kumar, Joseph Gyamfi, (Jamie) Yeon Ju Heo, and Rob Ness"
+name: "CSDA1040 Advanced Methods of Data Analysis"
+date: "June 23, 2019"
+output:
+  html_document:
+  df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+## Abstract
+Our objective for this assignment is to produce a product recommending application.  Our success criteria will be determined by the completeness by which the code and application user interface both selects and displays the most commonly associated purchased items, based on initial selection(s) of pre-determined items.  This R Shiny application could be used in a physical retail setting to determine product layout but is ideally suited for an online purchasing environment to help increase sales by recommending additional items for consideration during a user's purchase experience.
+
+## Introduction and Discussion
+
+With the proliferation of online shopping, retailers and alternative vendors (e-retailers) such as Alibaba and Amazon rely heavily on recommending items or products beyond the consumer's original purchase.  These recommendations are achieved through a myriad of observations, pattern discovery, and ultimately data science analytics.
+
+For our project, we used two different models, collaborative filtering (part 1) and Apriori (part 2).  After reviewing both methods, we decided that our application would be powered by the collaborative filtering method, specifically an item-based collaborative filtering model.
+
+## Dataset Description
+
+For our data source, we used a dataset obtained from the UCI Machine Learning Repository of Online Retail transactions from http://archive.ics.uci.edu/ml/datasets/online+retail.  The multi-national dataset consists of 541,909 transactions of unique, all-occasion gifts that occurred between January 12, 2010 and September 12, 2011, and is spread across 8 variables defined as follows:
+
+1.	InvoiceNo: Invoice number.  Nominal, a 6-digit integral number uniquely assigned to each transaction. If this code starts with letter 'c', it indicates a cancellation. 
+2.	StockCode: Product (item) code.  Nominal, a 5-digit integral number uniquely assigned to each distinct product. 
+3.	Description: Product (item) name.  Nominal. 
+4.	Quantity: The quantities of each product (item) per transaction.  Numeric.	
+5.	InvoiceDate: Invice Date and time.  Numeric, the day and time when each transaction was generated. 
+6.	UnitPrice: Unit price.  Numeric, Product price per unit in sterling. 
+7.	CustomerID: Customer number.  Nominal, a 5-digit integral number uniquely assigned to each customer. 
+8.	Country: Country name.  Nominal, the name of the country where each customer resides.
+
+A few Descriptions and several CustomerIDs are missing and there are also some odd negatives Quantity and UnitPrice that would be worth investigating. It is also worth noting that InvoiceDate is of POSIXct format, from which information about Date and Time of purchase can be extracted.
+
+## Ethical ML Framework
+
+Our recommender app is based on an open-source, multi-national transaction dataset of all-occasion gifts from 38 counties.  The recommendations are unbiased, and are simply determined by the frequency of like-purchases.  It does not consider race or religion as a basis for determining what is a 'good fit' for a consumer.  For example, a consumer may be attempting to purchase a Valentine's Day gift, but may be offered a Christmas gift idea (if the two were frequently purchased historically).  Also, there may be a segment of the population that may take offence to the recommendations, but that is not the intention, and further study is required to eliminate any potential bias.
+
+
+# Loading Libraries 
+```{r}
+#install and load package arules
+#install.packages("arules")
+library(arules)
+
+#install and load arulesViz
+#install.packages("arulesViz")
+library(arulesViz)
+
+#install and load readxml
+#install.packages("readxml")
+library(readxl)
+
+#install and load knitr
+#install.packages("knitr")
+library(knitr)
+
+#load ggplot2 as it comes in tidyverse
+library(ggplot2)
+
+#install and load plyr
+#install.packages("plyr")
+library(plyr)
+
+#install and load dplyr
+#install.packages("dplyr")
+library(dplyr)
+
+
+
+
+library(data.table)           
+              
+library(tidyverse)
+library(lubridate)
+library(skimr)                
+library(knitr)                
+library(treemap)
+library(ggplot2)
+```
+
+# Data Preparation
+```{r}
+#read excel into R dataframe
+retail <- read_excel(file.choose())
+```
+
+```{r}
+#complete.cases(data) returns a logical vector indicating which rows have no missing values. Then use the vector to get only rows that are complete using retail[,].
+retail <- retail[complete.cases(retail), ]
+summary (retail)
+```
+
+```{r}
+
+```
+
+############################################################################
+
+#Cancellations
+#The very handy Attribute Information tells us that if the InvoiceNo starts with letter a letter C, it indicates a cancellation
+#retail %>% 
+#  filter(grepl("C", retail$InvoiceNo)) %>% 
+#  summarise(Total=n()) %>%
+  
+#Cancellations are not needed for the analysis so they can be removed
+
+```{r}
+retail  <- retail %>% 
+  filter(!grepl("C", retail$InvoiceNo))
+```
+
+
+#Negative Quantities
+#When filtering by non positive Quantity, the Description shows what looks #like a series of manually entered comments (e.g.“thrown away”, “Unsaleable”, #“damaged”,“?”). Given that UnitPrice is also set to zero for all of them, it #is safe to assume that these were adjustments codes.
+
+
+```{r}
+retail %>% 
+  filter(Quantity <= 0) %>% 
+  group_by(Description, UnitPrice) %>% 
+  summarise(count =n()) %>%
+  arrange(desc(count)) %>% 
+  ungroup()
+```
+
+
+#Remove all rows with non-positive Quantity.
+
+```{r}
+retail  <- retail %>% 
+  filter(Quantity > 0)
+```
+
+
+#Non-Product StockCodes
+#Turning my attention to StockCode, notice a handful of non-product related codes (‘Postage’, ‘Bank Charges’, ‘Gift Vouchers’, etc.).
+# Non-product related codes
+
+```{r}
+stc <- c('AMAZONFEE', 'BANK CHARGES', 'C2', 'DCGSSBOY', 'DCGSSGIRL', 'DOT', 'gift_0001_', 'PADS', 'POST')
+retail %>%  
+  filter(grepl(paste(stc, collapse="|"), StockCode))  %>% 
+  group_by(StockCode, Description) %>% 
+  summarise(count =n()) %>%
+  arrange(desc(count)) %>% 
+  ungroup()
+```
+
+
+#These can all be removed as well.
+
+```{r}
+retail <- filter(retail, !grepl(paste(stc, collapse="|"), StockCode))
+```
+
+
+#Description
+#Focusing now on the Description field, there are an additional 50 manually entered annotations that need removing. In one case an employee has even vented out their frustration at one of their co-workers (“alan hodge cant mamage this section”), with misspelling and all!
+
+# Additional adjustment codes to remove
+
+```{r}
+descr <- c( "check", "check?", "?", "??", "damaged", "found", 
+            "adjustment", "Amazon", "AMAZON", "amazon adjust", 
+            "Amazon Adjustment", "amazon sales", "Found", "FOUND",
+            "found box", "Found by jackie ","Found in w/hse","dotcom", 
+            "dotcom adjust", "allocate stock for dotcom orders ta", "FBA", "Dotcomgiftshop Gift Voucher £100.00", "on cargo order",
+            "wrongly sold (22719) barcode", "wrongly marked 23343",
+            "dotcomstock", "rcvd be air temp fix for dotcom sit", 
+            "Manual", "John Lewis", "had been put aside", 
+            "for online retail orders", "taig adjust", "amazon", 
+            "incorrectly credited C550456 see 47", "returned", 
+            "wrongly coded 20713", "came coded as 20713", 
+            "add stock to allocate online orders", "Adjust bad debt", 
+            "alan hodge cant mamage this section", "website fixed",
+            "did  a credit  and did not tick ret", "michel oops",
+            "incorrectly credited C550456 see 47", "mailout", "test",
+            "Sale error",  "Lighthouse Trading zero invc incorr", "SAMPLES",
+            "Marked as 23343", "wrongly coded 23343","Adjustment", 
+            "rcvd be air temp fix for dotcom sit", "Had been put aside." )
+```
+
+
+#Now filter out the unwanted entries.
+
+```{r}
+retail <- retail %>% 
+  filter(!Description %in% descr)
+```
+
+
+#Last but not least, there are also some 600 NAs in Description.
+
+```{r}
+sum(is.na(retail$Description))
+```
+
+
+#Given their small number (around 0.1% of total) I will just remove them.
+
+```{r}
+retail <- retail %>% 
+  filter(!is.na(Description))
+```
+
+
+#Customer ID
+#There is still a significant number of NAs in CustomerID, which I will leave as they are.
+
+```{r}
+retail$CustomerID %>%  
+  skim()
+```
+
+  
+```{r}
+sapply(retail[ ,c('InvoiceNo','CustomerID')], 
+       function(x) length(unique(x)))
+```
+
+
+#In the second post, for the analysis,  we need to arrange data in a 
+#user-item format, where “users” can be either customers or 
+#orders. Given that there are almost 5 times as many Orders as there are Customers, 
+#we are going to use InvoiceNo for orders in the analysis, which should make for a richer information set.
+
+#Finally, convert into appropriate data types
+
+```{r}
+retail <- retail %>%
+  # Setting 'Description' and 'Country' as factors
+  mutate(Description = as.factor(Description)) %>%
+  mutate(Country = as.factor(Country)) %>% 
+  # Changing 'InvoiceNo' type to numeric
+  mutate(InvoiceNo = as.numeric(InvoiceNo)) %>% 
+  # Extracting 'Date' and 'Time' from 'InvoiceDate'
+  mutate(Date = as.Date(InvoiceDate)) %>% 
+  mutate(Time = as.factor(format(InvoiceDate,"%H:%M:%S")))
+```
+
+  
+  
+```{r}
+glimpse(retail)
+
+```
+
+
+
+
+
+
+```{r}
+#Use mutate function from dplyr package to edit or add new columns to dataframe. 
+#Here Description column is being converted to factor column. as.factor converts column to factor column. %>% is an operator used to pipe values to another function or expression
+retail %>% mutate(Description = as.factor(Description))
+```
+
+```{r}
+#Similarly for Country column
+retail %>% mutate(Country = as.factor(Country))
+```
+
+```{r}
+#Converts character data to date. Store InvoiceDate as date in new variable
+retail$Date <- as.Date(retail$InvoiceDate)
+```
+
+```{r}
+#Extract time from InvoiceDate and store in another variable
+TransTime<- format(retail$InvoiceDate,"%H:%M:%S")
+```
+
+```{r}
+#Convert and edit InvoiceNo into numeric
+InvoiceNo <- as.numeric(as.character(retail$InvoiceNo))     
+```
+
+```{r}
+#Bind new columns TransTime and InvoiceNo into dataframe retail
+cbind(retail,TransTime)
+cbind(retail,InvoiceNo)
+```
+
+```{r}
+#get a glimpse of your data
+glimpse(retail)
+```
+
+```{r}
+
+#Exploring the dataset
+# We are now ready to take a look at the dataset different features.
+# Examples 
+#(a) What items do people buy more often?
+retail %>% 
+  group_by(Description) %>% 
+  summarize(count = n()) %>% 
+  top_n(10, wt = count) %>%
+  arrange(desc(count)) %>% 
+  ggplot(aes(x = reorder(Description, count), y = count))+
+  geom_bar(stat = "identity", fill = "royalblue", colour = "blue") +
+  labs(x = "", y = "Top 10 Best Sellers", title = "Most Ordered Products") +
+  coord_flip() +
+  theme_grey(base_size = 12)
+#Plot shows that the heart-shaped tea light holder is the most popular item.
+
+# (b) What percentage of total is top ten sold products?
+retail %>% 
+  group_by(Description) %>% 
+  summarize(count = n()) %>% 
+  mutate(pct=(count/sum(count))*100) %>% 
+  arrange(desc(pct)) %>% 
+  ungroup() %>% 
+  top_n(10, wt=pct)
+#Top 10 most sold products represent around 3% of total items sold by the company
+
+# (c) What time of day do people buy more often?
+retail %>% 
+  ggplot(aes(hour(hms(Time)))) + 
+  geom_histogram(stat = "count",fill = "#E69F00", colour = "red") +
+  labs(x = "Hour of Day", y = "") +
+  theme_grey(base_size = 12)
+# Lunchtime is the preferred time for shopping online, with the majority of orders places between 12 noon and 3pm.
+
+# (d) What day of the week do people buy more often?
+retail %>% 
+  ggplot(aes(wday(Date, 
+                  week_start = getOption("lubridate.week.start", 1)))) + 
+  geom_histogram(stat = "count" , fill = "forest green", colour = "dark green") +
+  labs(x = "Day of Week", y = "") +
+  scale_x_continuous(breaks = c(1,2,3,4,5,6,7),
+                     labels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")) +
+  theme_grey(base_size = 14)
+#Orders peak on Thursdays with no orders processed on Saturdays.
+
+# (e) How many items does each customer buy, on average?
+retail %>% 
+  group_by(InvoiceNo) %>% 
+  summarise(n = mean(Quantity)) %>%
+  ggplot(aes(x=n)) +
+  geom_histogram(bins = 100000,fill = "purple",colour = "black") + 
+  coord_cartesian(xlim=c(0,100)) +
+  scale_x_continuous(breaks=seq(0,100,10)) +
+  labs(x = "Average Number of Items per Purchase", y = "") +
+  theme_grey(base_size = 14)
+# Plot shows that the large majority of customers typically purchase between 2 and 15 items, with a peak at 2.
+
+# (f) What is the average value per order?
+retail %>% 
+  mutate(Value = UnitPrice * Quantity) %>% 
+  group_by(InvoiceNo) %>% 
+  summarise(n = mean(Value)) %>%
+  ggplot(aes(x=n)) +
+  geom_histogram(bins = 200000, fill="firebrick3", colour = "sandybrown") + 
+  coord_cartesian(xlim=c(0,100)) +
+  scale_x_continuous(breaks=seq(0,100,10)) +
+  labs(x = "Average Value per Purchase", y = "") + 
+  theme_grey(base_size = 14)
+#The bulk of orders have a value below £20, with the distribution showing a double peak, one at £6 and a more pronounced one at £17.
+
+```
+
+
+
+```{r}
+# Convert dataframe into transaction data before applying Association Rule Minding.
+#Before applying Association Rule mining, we need to convert dataframe into transaction data so that all items that are bought together in one invoice are in one row. 
+#You can see in glimpse output that each transaction is in atomic form, that is all products belonging to one invoice are atomic as in relational databases. This format is also called as the singles format.
+
+#We need to group data in the retail dataframe either by CustomerID, CustomerID and Date or using InvoiceNo and Date. We need this grouping and apply a function on it and store the output in another dataframe. This can be done by ddply.
+
+#The following lines of code combine all products from one InvoiceNo and date, and combine all products from that InvoiceNo and date as one row, with each item, separated by a comma 
+#Syntax is  ddply(dataframe, variables_to_be_used_to_split_data_frame, function_to_be_applied)
+
+transactionData <- ddply(retail,c("InvoiceNo","Date"),
+                         function(df1)paste(df1$Description,
+                                            collapse = ","))
+
+#The R function paste() concatenates vectors to character and separated results using collapse=[any optional charcater string ]. Here ',' is used
+
+#Show Dataframe transactionData
+transactionData
+```
+
+```{r}
+#Next, as InvoiceNo and Date will not be of any use in the rule mining, we set them to NULL
+#set column InvoiceNo of dataframe transactionData  
+transactionData$InvoiceNo <- NULL
+#set column Date of dataframe transactionData
+transactionData$Date <- NULL
+
+#Show Dataframe transactionData
+transactionData
+```
+
+```{r}
+#Rename column to items
+colnames(transactionData) <- c("items")
+
+#Show Dataframe transactionData
+transactionData
+```
+
+```{r}
+#This format for transaction data is called the basket format. Next, we store this transaction data into a .csv (Comma Separated Values) file. 
+#We use write.csv()
+#quote: If TRUE it will surround character or factor column with double quotes. If FALSE nothing will be quoted
+#row.names: either a logical value indicating whether the row names of x are to be written along with x, or a character vector of row names to be written.
+
+write.csv(transactionData,file = "transactionData.csv", quote = FALSE, row.names = FALSE)
+```
+
+```{r}
+#Next, load the transaction data into an object of the transaction class. This is done by using the R function read.transactions of the arules package.
+#The following line of code will take the transaction data file market_basket_transactions.csv which is in basket format and convert it into an 
+#object of the transaction class.
+tr <- read.transactions('transactionData.csv', format = 'basket', sep=',')
+
+
+
+#sep tells how items are separated. In this case we have separated items by comma
+
+#Use summary to see item-set distribution
+
+
+```
+
+```{r}
+#Generate an itemFrequencyPlot to create an item Frequency Bar Plot to view the distribution of objects based on 
+#itemMatrix (e.g., >transactions or items in >itemsets and >rules) which is our case.
+
+# Create an item frequency plot for the top 20 items
+if (!require("RColorBrewer")) {
+  # install color package of R
+  install.packages("RColorBrewer")
+  #include library RColorBrewer
+  library(RColorBrewer)
+}
+itemFrequencyPlot(tr,topN=20,type="absolute",col=brewer.pal(8,'Pastel2'), main="Absolute Item Frequency Plot")
+itemFrequencyPlot(tr,topN=20,type="relative",col=brewer.pal(8,'Pastel2'),main="Relative Item Frequency Plot")
+```
+
+# Mine Association Rules
+```{r}
+#This plot shows that 'WHITE HANGING HEART T-LIGHT HOLDER' and 'REGENCY CAKESTAND 3 TIER' have the most sales. 
+#So to increase the sale of 'SET OF 3 CAKE TINS PANTRY DESIGN' the retailer can put it near 'REGENCY CAKESTAND 3 TIER'. 
+
+#Generating Rules!
+#Next step is to mine the rules using the APRIORI algorithm. The function apriori() is from package arules.
+# Min Support as 0.001, confidence as 0.8.
+association.rules <- apriori(tr, parameter = list(supp=0.001, conf=0.8,maxlen=10))
+
+summary(association.rules)
+
+inspect(association.rules[1:10])
+
+
+```
+
+```{r}
+#For shorter length rules, reduce maxlen value
+shorter.association.rules <- apriori(tr, parameter = list(supp=0.001, conf=0.8,maxlen=3))
+```
+```{r}
+#Removing redundant rules
+#We can remove rules that are subsets of larger rules as follows:
+
+subset.rules <- which(colSums(is.subset(association.rules, association.rules)) > 1) # get subset rules in vector
+```
+
+```{r}
+#which() returns the position of elements in the vector for which value is TRUE.
+#colSums() forms a row and column sums for dataframes and numeric arrays.
+#is.subset() Determines if elements of one vector contain all the elements of other
+
+length(subset.rules)  
+
+subset.association.rules. <- association.rules[-subset.rules] # remove subset rules.
+```
+```{r}
+#Finding Rules related to given items
+#Sometimes, you want to work on a specific product. If you want to find out what causes influence on the purchase of item X, you can 
+#use appearance option in the apriori command. appearance gives us options to set LHS (IF part) and RHS (THEN part) of the rule.
+#For example, to find what customers buy before buying 'METAL' run the following line of code:
+
+metal.association.rules <- apriori(tr, parameter = list(supp=0.001, conf=0.8),appearance = list(default="lhs",rhs="METAL"))
+```
+```{r}
+# Here lhs=METAL because you want to find out the probability of that in how many customers buy METAL along with other items
+inspect(head(metal.association.rules))
+```
+
+```{r}
+#Similarly, to find the answer to the question Customers who bought METAL also bought.... you will keep METAL on lhs:
+metal.association.rules <- apriori(tr, parameter = list(supp=0.001, conf=0.8),appearance = list(lhs="METAL",default="rhs"))
+```
+
+```{r}
+# Here lhs=METAL because you want to find out the probability of that in how many customers buy METAL along with other items
+inspect(head(metal.association.rules))
+```
+
+#Visualizing Association Rules
+```{r}
+# (A) Scatter-Plot
+#A straight-forward visualization of association rules is to use a scatter plot using plot() of the arulesViz package. 
+#It uses Support and Confidence on the axes. In addition, a third measure Lift is used by default to color (grey levels) of the points.
+# Filter rules with confidence greater than 0.4 or 40%
+subRules<-association.rules[quality(association.rules)$confidence>0.4]
+#Plot SubRules
+plot(subRules)
+```
+
+```{r}
+#The above plot shows that rules with high lift have low support. 
+#You can use the following options for the plot: plot(rulesObject, measure, shading, method)
+plot(subRules,method="two-key plot")
+#The two-key plot uses support and confidence on x and y-axis respectively. It uses order for coloring. The order is the number of items in the rule.
+```
+
+```{r}
+#(B) Interactive Scatter-Plot
+#An amazing interactive plot can be used to present your rules that use arulesViz and plotly. 
+#You can hover over each rule and view all quality measures (support, confidence and lift).
+#Example
+plotly_arules(subRules)
+```
+
+```{r}
+# (C) Graph-Based Visualizations
+#Graph-based techniques visualize association rules using vertices and edges where vertices are labeled with item names, and item sets or 
+#rules are represented as a second set of vertices. Items are connected with item-sets/rules using directed arrows. Arrows pointing from 
+#items to rule vertices indicate LHS items and an arrow from a rule to an item indicates the RHS. The size and color of vertices often 
+#represent interest measures. 
+#Graph plots are a great way to visualize rules but tend to become congested as the number of rules increases. So it is better to visualize 
+#less number of rules with graph-based visualizations.
+
+#Let's select 10 rules from subRules having the highest confidence.
+top10subRules <- head(subRules, n = 10, by = "confidence")
+
+#Now, plot an interactive graph. Note: You can make all your plots interactive using engine=htmlwidget parameter in plot
+plot(top10subRules, method = "graph",  engine = "htmlwidget")
+
+#From arulesViz graphs for sets of association rules can be exported in the GraphML format or as a Graphviz dot-file to be explored in tools like Gephi. For example, the 1000 rules with the highest lift are exported by:
+saveAsGraph(head(subRules, n = 1000, by = "lift"), file = "rules.graphml")
+
+```
+
+```{r}
+# (D) Individual Rule Representation
+# This representation is also called as Parallel Coordinates Plot. It is useful to visualize which products 
+#along with which items cause what kind of sales.
+
+#As we know, the RHS is the Consequent or the item we propose the customer will buy; the positions are in the LHS where 2 is the most 
+#recent addition to our basket and 1 is the item we previously had.
+# Filter top 20 rules with highest lift
+subRules2<-head(subRules, n=20, by="lift")
+plot(subRules2, method="paracoord")
+
+#Looking at the topmost arrow, the plot shows that when I have 'CHILDS GARDEN SPADE PINK' and 'CHILDS GARDEN RAKE PINK' in my shopping cart, I am likely to buy 'CHILDS GARDEN RAKE BLUE' along with these as well.
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+library(data.table)
+library(tidyverse)            
+library(knitr)
+library(recommenderlab)
+```
+
+
+
+
+
+
+```{r}
+retail <- retail %>%  # create unique identifier
+mutate(InNo_Desc = paste(InvoiceNo, Description, sep = ' ')) # filter out duplicates 
+retail <- retail[!duplicated(retail$InNo_Desc), ] %>% 
+select(-InNo_Desc) # drop unique identifier
+
+
+```
+
+
+
+# Removing duplicates 
+
+# CHECK:  total row count - 517,354
+
+# Create the rating matrix 
+
+```{r}
+ratings_matrix <- retail %>%# Select only needed variables
+select(InvoiceNo, Description) %>% # Add a column of 1s
+mutate(value = 1) %>%# Spread into user-item format
+spread(Description, value, fill = 0) %>%
+select(-InvoiceNo) %>%# Convert to matrix
+as.matrix() %>%# Convert to recommenderlab class 'binaryRatingsMatrix'
+as("binaryRatingMatrix")
+
+```
+
+
+
+
+# Create evaluation scheme
+
+```{r}
+scheme <- ratings_matrix %>% 
+  evaluationScheme(method = "cross",
+                      k      = 5, 
+                      train  = 0.8,
+                      given  = -1)
+
+```
+
+
+
+
+
+
+# Set up List of Algorithms
+
+
+```{r}
+algorithms <- list(
+      "association rules" = list(name  = "AR", param = list(supp = 0.01, conf = 0.01)),
+      "random items"      = list(name  = "RANDOM",  param = NULL),
+      "popular items"     = list(name  = "POPULAR", param = NULL),
+      "item-based CF"     = list(name  = "IBCF", param = list(k = 5)),
+      "user-based CF"     = list(name  = "UBCF", param = list(method = "Cosine", nn = 500))
+)
+
+```
+#
+algorithms <- list(
+      "association rules" = list(name  = "AR", param = list(supp = 0.01, conf = 0.01)),
+      "random items"      = list(name  = "RANDOM",  param = NULL),
+      "popular items"     = list(name  = "POPULAR", param = NULL),
+      "item-based CF"     = list(name  = "IBCF", param = list(k = 5)),
+      "user-based CF"     = list(name  = "UBCF", param = list(method = "Cosine", nn = 500))
+)
+
+
+
+# Estimate the Models
+```{r}
+results <- recommenderlab::evaluate(scheme, 
+                                    algorithms, 
+                                    type  = "topNList", 
+                                    n     = c(1, 3, 5, 10, 15, 20)
+)
+```
+
+
+
+# Results for each single model can be easily retrieved and inspected.
+```{r}
+results$'popular' %>% 
+  getConfusionMatrix() 
+```
+
+
+
+# Sort out results
+```{r}
+
+tmp <- results$`user-based CF` %>% 
+getConfusionMatrix()  %>%  
+as.list() # Pull into a list all confusion matrix information for one model
+
+as.data.frame( Reduce("+",tmp) / length(tmp)) %>% # average value of 5 cross-validation rounds
+mutate(n = c(1, 3, 5, 10, 15, 20)) %>% # Add a column for number of recommendations calculated
+select('n', 'precision', 'recall', 'TPR', 'FPR') # Select only columns needed and sorting out order 
+```
+
+
+
+# I put the previous steps into a formula. 
+```{r}
+
+avg_conf_matr <- function(results) {
+tmp <- results %>%
+getConfusionMatrix()  %>%  
+as.list() 
+as.data.frame( Reduce("+",tmp) / length(tmp)) %>% 
+mutate(n = c(1, 3, 5, 10, 15, 20)) %>%
+select('n', 'precision', 'recall', 'TPR', 'FPR') 
+}
+
+```
+
+
+# use  `map()` to get all results in a tidy format, ready for charting.
+```{r}
+results_tbl <- results %>%
+map(avg_conf_matr) %>% # iterate function across all models
+enframe() %>% # Turning into an unnested tibble
+unnest() # Unnesting to have all variables on same level
+
+```
+
+
+
+# ROC curve
+```{r}
+results_tbl %>%
+  ggplot(aes(FPR, TPR, colour = fct_reorder2(as.factor(name), FPR, TPR))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "ROC curves",
+  colour = "Model") +
+  theme_grey(base_size = 14)
+
+```
+
+
+# Precision-Recall curve
+```{r}
+results_tbl %>%
+  ggplot(aes(recall, precision, 
+  colour = fct_reorder2(as.factor(name),  precision, recall))) +
+  geom_line() +
+  geom_label(aes(label = n))  +
+  labs(title = "Precision-Recall curves",
+  colour = "Model") +
+  theme_grey(base_size = 14)
+
+```
+
+
+## Predictions for a new user
+
+# create a made-up order with a string containing 6 products selected at random.
+```{r}
+customer_order <- c("GREEN REGENCY TEACUP AND SAUCER",
+                    "SET OF 3 BUTTERFLY COOKIE CUTTERS",
+                    "JAM MAKING SET WITH JARS",
+                    "SET OF TEA COFFEE SUGAR TINS PANTRY",
+                    "SET OF 4 PANTRY JELLY MOULDS")
+
+```
+
+
+
+# put string in a format that recommenderlab accepts.
+```{r}
+new_order_rat_matrx <- retail %>% 
+select(Description) %>% # Select item descriptions from retail dataset
+unique() %>% 
+mutate(value = as.numeric(Description %in% customer_order)) %>% # Add a 'value' column
+spread(key = Description, value = value) %>% # Spread into sparse matrix format
+as.matrix() %>% # Change to a matrix
+as("binaryRatingMatrix") # Convert to recommenderlab class 'binaryRatingsMatrix'
+
+```
+
+
+
+# create a `Recommender`
+```{r}
+recomm <- Recommender(getData(scheme, 'train'), 
+                      method = "IBCF",   
+                      param = list(k = 5))
+
+```
+
+
+
+# pass the `Recommender` and the made-up order to the `predict` function to create 
+# a top 10 recommendation list for the new customer.
+```{r}
+pred <- predict(recomm, 
+                newdata = new_order_rat_matrx, 
+                n       = 10)
+
+```
+
+
+
+# inspect pediction as a list
+```{r}
+as(pred, 'list')
+
+```
+
+
+```{r}
+
+past_orders_matrix <- retail %>%
+    # Select only needed variables
+    select(InvoiceNo, Description) %>% 
+    # Add a column of 1s
+    mutate(value = 1) %>%
+    # Spread into user-item format
+    spread(Description, value, fill = 0) %>%
+    select(-InvoiceNo) %>% 
+    # Convert to matrix
+    as.matrix() %>% 
+    # Convert to class "dgCMatrix"
+    as("dgCMatrix")
+```
+
+## Deployment of the R Shiny App
+
+Saving recommender data objects
+
+```{r}
+saveRDS(past_orders_matrix, 
+        file = "past_orders_matrix.rds")
+
+```
+
+
+```{r}
+item_list <- retail %>% 
+    select(Description) %>% 
+    unique()
+
+saveRDS(item_list, 
+        file = "item_list.rds")
+```
+
+
+## Application Deployment
+
+Our proof of concept is functional in nature and demonstrates our app's ability to recommend items for purchase to a broad consumer base.
+
+We feel that we can further refine our recommender application to consider more features in the user interface, such as price range consideration and/or product imaging.
+
+Our Shiny application is currently deployed at:  https://jamieheo.shinyapps.io/shinyapps2/, and our GitHub Repository is located at: https://github.com/robcness/YorkU-CSDA1040F18S2-Group-D.
+
