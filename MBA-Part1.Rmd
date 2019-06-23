@@ -1,6 +1,7 @@
 ---
 title: "CDSA1040Project1"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
 ---
@@ -8,9 +9,16 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+## Abstract
+Our objective for this assignment is to produce a product recommending application.  Our success criteria will be determined by the completeness by which the code and application user interface both selects and displays the most commonly associated purchased items, based on initial selection(s) of pre-determined items.  This R Shiny application could be used in a physical retail setting to determine product layout but is ideally suited for an online purchasing environment to help increase sales by recommending additional items for consideration during a user's purchase experience.
 
+## Introduction and Discussion
 
-### Loading the Packages
+With the proliferation of online shopping, retailers and alternative vendors (e-retailers) such as Alibaba and Amazon rely heavily on recommending items or products beyond the consumer's original purchase.  These recommendations are achieved through a myriad of observations, pattern discovery, and ultimately data science analytics.
+
+For our project, we used two different models, collaborative filtering (part 1) and Apriori (part 2).  After reviewing both methods, we decided that our application would be powered by the collaborative filtering method, specifically an item-based collaborative filtering model.
+
+## Loading the Packages
 
 ```{r}
 # Importing libraries
@@ -24,36 +32,25 @@ library(knitr)
 library(treemap)
 ```
 
+## Data Exploration
+For our data source, we used a dataset obtained from the UCI Machine Learning Repository of Online Retail transactions from http://archive.ics.uci.edu/ml/datasets/online+retail.  The multi-national dataset consists of 541,909 transactions of unique, all-occasion gifts that occurred between January 12, 2010 and September 12, 2011, and is spread across 8 variables defined as follows:
 
+1.	InvoiceNo: Invoice number.  Nominal, a 6-digit integral number uniquely assigned to each transaction. If this code starts with letter 'c', it indicates a cancellation. 
+2.	StockCode: Product (item) code.  Nominal, a 5-digit integral number uniquely assigned to each distinct product. 
+3.	Description: Product (item) name.  Nominal. 
+4.	Quantity: The quantities of each product (item) per transaction.  Numeric.	
+5.	InvoiceDate: Invice Date and time.  Numeric, the day and time when each transaction was generated. 
+6.	UnitPrice: Unit price.  Numeric, Product price per unit in sterling. 
+7.	CustomerID: Customer number.  Nominal, a 5-digit integral number uniquely assigned to each customer. 
+8.	Country: Country name.  Nominal, the name of the country where each customer resides.
 
+A few Descriptions and several CustomerIDs are missing and there are also some odd negatives Quantity and UnitPrice that would be worth investigating. It is also worth noting that InvoiceDate is of POSIXct format, from which information about Date and Time of purchase can be extracted.
 
 ## Loading and Inspecting the Data
 ```{r}
 # import raw data file and trim leading and trailing whitespaces
-retail <- read_excel("Online_Retail.xlsx", trim_ws = TRUE)
+retail <- read_excel("C:/Users/Rob/Desktop/ROBs STUFF/YorkU - Big Data Analytics (BDA F18_S2)/CSDA1040 Advanced Methods of Data Analysis/TEAM PROJECTS/Assignment 1/Online Retail.xlsx", trim_ws = TRUE)
 ```
-##
-
-The dataset consists of just over 541,909 observations spread across 8 variables. A few Descriptions and several CustomerIDs are missing and there are also some odd negatives Quantity and UnitPrice that would be worth investigating. It’s also worth noting that InvoiceDate is of POSIXct format, from which information about Date and Time of purchase can be extracted.
-
-Dataset variables description
-
-InvoiceNo   (Invoice number) - 6-digit integral number. Indicates cancellation if starts with ‘C’
-
-StockCode   (Product item code) - 5-digit integral number
-
-Description (Product (item)) - name
-
-Quantity	   (Quantities of each product (item) per transaction) - Numeric
-
-InvoiceDate (Invoice Date and Time) - when each transaction was generated
-
-UnitPrice	 (Unit price) - Numeric, Product price per unit in sterling
-
-CustomerID	 (Customer number) - 5-digit integral number unique to each customer
-
-Country	   (Country name) -  The name of the country where each customer resides
-
 
 ```{r}
 # First glance at the data
@@ -61,7 +58,7 @@ retail %>%  skim()
 ```
 
 ##
-Cancellations: The Variables Description, if the InvoiceNo starts with letter ‘C’, it indicates a cancellation
+Cancellations: The Variables Description, if the InvoiceNo starts with letter C, it indicates a cancellation
 
 ```{r}
 retail %>% 
