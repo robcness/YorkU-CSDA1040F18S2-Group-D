@@ -1,9 +1,13 @@
 ---
-title: "CDSA1040Project1"
+title: "Product Recommender for an Online Retailer"
+subtitle: "A Simple, Item-Based Collaborative Filtering Recommender Applicaiton in R and R Shiny"
+author: "Amitabh Kumar, Joseph Gyamfi, (Jamie) Yeon Ju Heo, and Rob Ness"
+name: "CSDA1040 Advanced Methods of Data Analysis"
+date: "June 23, 2019"
 output:
-  pdf_document: default
   html_document:
     df_print: paged
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -275,8 +279,10 @@ retail %>%
   labs(x = "Average Number of Items per Purchase", y = "") +
   theme_grey(base_size = 14)
 ```
-# Comments
-## This concludes the data preparation and visualisation part of the our project. We removed Cancellations, eliminated negative Quantity and UnitPrice, got rid of NAs in Description and created two new variables, Date and Time. A total of 13,761 rows (roughly 2.5% of the initial count) were discarded and the dataset has now 528,148 observations.
+
+
+## Comments
+This concludes the data preparation and visualisation part of the our project. We removed Cancellations, eliminated negative Quantity and UnitPrice, got rid of NAs in Description and created two new variables, Date and Time. A total of 13,761 rows (roughly 2.5% of the initial count) were discarded and the dataset has now 528,148 observations.
 
 
 
